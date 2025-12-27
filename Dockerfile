@@ -12,12 +12,15 @@ RUN pip install --no-cache-dir poetry
 # Copy dependency files and README (needed by Poetry)
 COPY pyproject.toml poetry.lock README.md ./
 
-# Install dependencies (no dev deps, no virtualenv)
+# Install dependencies only (skip installing current project)
 RUN poetry config virtualenvs.create false \
-    && poetry install --only main --no-interaction --no-ansi
+    && poetry install --only main --no-interaction --no-ansi --no-root
 
 # Copy application code
 COPY src/ ./src/
+
+# Install current project
+RUN poetry install --only main --no-interaction --no-ansi
 
 # Pre-download ML model (cached in image layer ~1.2GB)
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')"
