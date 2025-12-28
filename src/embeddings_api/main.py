@@ -64,8 +64,8 @@ async def health_check() -> HealthResponse:
 async def generate_embeddings(request: GenerateRequest) -> GenerateResponse:
     """Generate embeddings for a list of texts.
 
-    Requires authentication via API key in the Authorization header:
-    `Authorization: Bearer <api_key>`
+    Requires authentication via API key in the X-API-Key header:
+    `X-API-Key: <api_key>`
     """
     if not embedding_service.is_loaded:
         raise HTTPException(
