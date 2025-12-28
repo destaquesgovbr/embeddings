@@ -20,7 +20,7 @@ def client():
 @pytest.fixture
 def auth_headers():
     """Create authorization headers with test API key."""
-    return {"Authorization": "Bearer test-api-key"}
+    return {"X-API-Key": "test-api-key"}
 
 
 class TestHealthEndpoint:
@@ -56,7 +56,7 @@ class TestGenerateEndpoint:
 
     def test_generate_with_invalid_api_key(self, client):
         """Generate endpoint should reject invalid API key."""
-        headers = {"Authorization": "Bearer wrong-key"}
+        headers = {"X-API-Key": "wrong-key"}
         response = client.post("/generate", json={"texts": ["test"]}, headers=headers)
         assert response.status_code == 401
 
@@ -125,14 +125,13 @@ class TestGenerateEndpoint:
 class TestAuthFormats:
     """Tests for different auth header formats."""
 
-    def test_bearer_token_format(self, client):
-        """Should accept Bearer token format."""
-        headers = {"Authorization": "Bearer test-api-key"}
+    def test_x_api_key_header(self, client):
+        """Should accept X-API-Key header format."""
+        headers = {"X-API-Key": "test-api-key"}
         response = client.post("/generate", json={"texts": ["test"]}, headers=headers)
         assert response.status_code == 200
 
-    def test_raw_token_format(self, client):
-        """Should accept raw token format."""
-        headers = {"Authorization": "test-api-key"}
-        response = client.post("/generate", json={"texts": ["test"]}, headers=headers)
-        assert response.status_code == 200
+    def test_missing_api_key_header(self, client):
+        """Should reject requests without X-API-Key header."""
+        response = client.post("/generate", json={"texts": ["test"]})
+        assert response.status_code == 401
