@@ -1,27 +1,5 @@
 """Tests for the Embeddings API endpoints."""
 
-import os
-
-import pytest
-from fastapi.testclient import TestClient
-
-# Set test API key before importing app
-os.environ["API_KEY"] = "test-api-key"
-
-from src.embeddings_api.main import app  # noqa: E402
-
-
-@pytest.fixture
-def client():
-    """Create a test client."""
-    return TestClient(app)
-
-
-@pytest.fixture
-def auth_headers():
-    """Create authorization headers with test API key."""
-    return {"X-API-Key": "test-api-key"}
-
 
 class TestHealthEndpoint:
     """Tests for the /health endpoint."""
