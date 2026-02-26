@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "src/**"
+      - "src/embeddings_api/**"
       - "Dockerfile"
       - "pyproject.toml"
       - "poetry.lock"
