@@ -66,7 +66,7 @@ def generate_embeddings_dag():
 
         generator = EmbeddingGenerator(
             database_url=database_url,
-            api_url=emb_conn.host,
+            api_url=f"https://{emb_conn.host}",
             api_key=emb_conn.password,
         )
 
