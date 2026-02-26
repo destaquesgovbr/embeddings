@@ -15,7 +15,7 @@ import numpy as np
 import psycopg2
 from psycopg2.extras import execute_batch
 
-from embeddings_client.text_prep import prepare_text_for_embedding
+from .text_prep import prepare_text_for_embedding
 
 logger = logging.getLogger(__name__)
 
