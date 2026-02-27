@@ -1,0 +1,12 @@
+# Gerado automaticamente pelo template airflow-dgb.
+# NÃO editar manualmente. Para atualizar: copier update
+_src_path: /private/var/folders/h5/q3w1nyh93lgd82kcdjnnvqxc0000gn/T/copier._vcs.clone.fj5g6zi7
+_commit: 
+project_name: embeddings
+astro_runtime_version: 3.0-14
+python_requirements: "httpx\u003e=0.27.0\nnumpy\u003e=1.26.0\npsycopg2-binary\u003e=2.9.9"
+postgres_connection: "postgresql://govbrnews_app:PASSWORD@34.39.145.55:5432/govbrnews"
+extra_env_vars: "AIRFLOW_CONN_EMBEDDINGS_API=http://API_KEY@EMBEDDINGS_API_HOST"
+has_plugins: True
+plugin_modules: "embeddings_client"
+airflowignore_extras: ""
