@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - "src/embeddings_api/**"
+      - "src/embeddings_client/**"
       - "Dockerfile"
       - "pyproject.toml"
       - "poetry.lock"
