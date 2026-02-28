@@ -1,13 +1,16 @@
 """FastAPI application for generating text embeddings."""
 
+import base64
+import json
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 
 from . import __version__
 from .auth import verify_api_key
 from .embedding_service import embedding_service
+from .pubsub_handler import process_article
 from .schemas import ErrorResponse, GenerateRequest, GenerateResponse, HealthResponse
 
 logging.basicConfig(
@@ -86,6 +89,48 @@ async def generate_embeddings(request: GenerateRequest) -> GenerateResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         ) from e
+
+
+@app.post(
+    "/process",
+    tags=["Pub/Sub"],
+    summary="Process Pub/Sub push message for embedding generation",
+)
+async def process_pubsub(request: Request) -> Response:
+    """Handle Pub/Sub push message from dgb.news.enriched.
+
+    No API key required — authenticated via Pub/Sub push OIDC token
+    verified by Cloud Run IAM.
+    """
+    try:
+        envelope = await request.json()
+    except Exception:
+        return Response(status_code=400, content="Invalid JSON")
+
+    message = envelope.get("message", {})
+    data_b64 = message.get("data")
+    if not data_b64:
+        return Response(status_code=400, content="No data")
+
+    try:
+        payload = json.loads(base64.b64decode(data_b64))
+    except Exception:
+        return Response(status_code=400, content="Invalid data encoding")
+
+    unique_id = payload.get("unique_id")
+    if not unique_id:
+        return Response(status_code=400, content="Missing unique_id")
+
+    trace_id = message.get("attributes", {}).get("trace_id", "")
+    logger.info(f"Processing embedding for {unique_id} (trace={trace_id})")
+
+    try:
+        result = process_article(unique_id)
+        logger.info(f"Result for {unique_id}: {result['status']}")
+        return Response(status_code=200, content=json.dumps(result))
+    except Exception as e:
+        logger.error(f"Error processing {unique_id}: {e}", exc_info=True)
+        return Response(status_code=200, content=f"ACK (error: {e})")
 
 
 if __name__ == "__main__":
