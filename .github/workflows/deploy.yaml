@@ -11,50 +11,16 @@ on:
       - "poetry.lock"
       - ".github/workflows/deploy.yaml"
 
-env:
-  REGION: southamerica-east1
-  PROJECT_ID: inspire-7-finep
-  SERVICE_NAME: destaquesgovbr-embeddings-api
-  IMAGE: southamerica-east1-docker.pkg.dev/inspire-7-finep/destaquesgovbr-embeddings-api/embeddings-api
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          docker system prune -af
-          df -h
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: projects/990583792367/locations/global/workloadIdentityPools/github-pool/providers/github-provider
-          service_account: github-actions@inspire-7-finep.iam.gserviceaccount.com
-
-      - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
-
-      - name: Build Docker image
-        run: docker build -t ${{ env.IMAGE }}:${{ github.sha }} -t ${{ env.IMAGE }}:latest .
-
-      - name: Push Docker image
-        run: |
-          docker push ${{ env.IMAGE }}:${{ github.sha }}
-          docker push ${{ env.IMAGE }}:latest
-
-      - name: Deploy to Cloud Run
-        run: |
-          gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image ${{ env.IMAGE }}:${{ github.sha }} \
-            --region ${{ env.REGION }} \
-            --platform managed \
-            --quiet
+  deploy:
+    uses: destaquesgovbr/reusable-workflows/.github/workflows/cloud-run-deploy.yml@v2
+    with:
+      dockerfile: Dockerfile
+      ar_repository: destaquesgovbr-embeddings-api
+      image_name: embeddings-api
+      cloud_run_service: destaquesgovbr-embeddings-api
+      free_disk_space: true
