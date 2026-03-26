@@ -7,10 +7,9 @@ fetch from PG, generate embedding locally, update PG, publish event.
 
 import base64
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-
 
 # =============================================================================
 # Fixtures

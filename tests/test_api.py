@@ -1,5 +1,67 @@
 """Tests for the Embeddings API endpoints."""
 
+from fastapi.testclient import TestClient
+
+from src.embeddings_api.config import Settings
+from src.embeddings_api.main import create_app
+
+
+class TestDocsDisabled:
+    """Tests for docs endpoints when DOCS_ENABLED=false."""
+
+    def test_swagger_returns_404(self):
+        """GET /docs should return 404 when docs is disabled."""
+        app = create_app(Settings(docs_enabled=False))
+        client = TestClient(app)
+        response = client.get("/docs")
+        assert response.status_code == 404
+
+    def test_redoc_returns_404(self):
+        """GET /redoc should return 404 when docs is disabled."""
+        app = create_app(Settings(docs_enabled=False))
+        client = TestClient(app)
+        response = client.get("/redoc")
+        assert response.status_code == 404
+
+    def test_openapi_json_returns_404(self):
+        """GET /openapi.json should return 404 when docs is disabled."""
+        app = create_app(Settings(docs_enabled=False))
+        client = TestClient(app)
+        response = client.get("/openapi.json")
+        assert response.status_code == 404
+
+    def test_health_still_works(self):
+        """GET /health should still work when docs is disabled."""
+        app = create_app(Settings(docs_enabled=False))
+        client = TestClient(app)
+        response = client.get("/health")
+        assert response.status_code == 200
+
+
+class TestDocsEnabled:
+    """Tests for docs endpoints when DOCS_ENABLED=true (default)."""
+
+    def test_swagger_returns_200(self):
+        """GET /docs should return 200 when docs is enabled."""
+        app = create_app(Settings(docs_enabled=True))
+        client = TestClient(app)
+        response = client.get("/docs")
+        assert response.status_code == 200
+
+    def test_redoc_returns_200(self):
+        """GET /redoc should return 200 when docs is enabled."""
+        app = create_app(Settings(docs_enabled=True))
+        client = TestClient(app)
+        response = client.get("/redoc")
+        assert response.status_code == 200
+
+    def test_openapi_json_returns_200(self):
+        """GET /openapi.json should return 200 when docs is enabled."""
+        app = create_app(Settings(docs_enabled=True))
+        client = TestClient(app)
+        response = client.get("/openapi.json")
+        assert response.status_code == 200
+
 
 class TestHealthEndpoint:
     """Tests for the /health endpoint."""

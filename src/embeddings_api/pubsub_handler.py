@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import psycopg2
 
@@ -34,7 +34,8 @@ def fetch_article(unique_id: str) -> dict | None:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, title, summary, content, content_embedding FROM news WHERE unique_id = %s",
+                "SELECT id, title, summary, content, content_embedding"
+                " FROM news WHERE unique_id = %s",
                 (unique_id,),
             )
             row = cur.fetchone()
@@ -63,7 +64,7 @@ def update_embedding(news_id: int, embedding: list[float]) -> None:
                     embedding_generated_at = %s
                 WHERE id = %s
                 """,
-                (embedding, datetime.now(timezone.utc), news_id),
+                (embedding, datetime.now(UTC), news_id),
             )
             conn.commit()
     except Exception:
@@ -85,7 +86,7 @@ def publish_embedded_event(unique_id: str, embedding_dim: int) -> None:
         client = pubsub_v1.PublisherClient()
         message = {
             "unique_id": unique_id,
-            "embedded_at": datetime.now(timezone.utc).isoformat(),
+            "embedded_at": datetime.now(UTC).isoformat(),
             "embedding_dim": embedding_dim,
         }
         client.publish(

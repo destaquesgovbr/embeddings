@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     # API authentication
     api_key: str = "dev-api-key"
 
+    # Documentation
+    docs_enabled: bool = True
+
     # Model configuration
     model_name: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 
