@@ -13,7 +13,10 @@ class Settings(BaseSettings):
     docs_enabled: bool = True
 
     # Model configuration
-    model_name: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+    # BGE-M3: multilingual, 1024-dim, 8192 max tokens
+    # Validated in data-science#1, chosen over mpnet-768d
+    model_name: str = "BAAI/bge-m3"
+    model_dimension: int = 1024
 
     # Server configuration
     host: str = "0.0.0.0"

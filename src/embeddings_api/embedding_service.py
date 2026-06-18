@@ -38,7 +38,7 @@ class EmbeddingService:
     def dimension(self) -> int:
         """Get the embedding dimension."""
         if self._model is None:
-            return 768  # Default for paraphrase-multilingual-mpnet-base-v2
+            return settings.model_dimension  # Default from config (1024 for BGE-M3)
         return self._model.get_sentence_embedding_dimension()
 
     @property
