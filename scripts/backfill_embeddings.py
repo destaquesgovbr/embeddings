@@ -30,6 +30,7 @@ import argparse
 import json
 import logging
 import os
+import subprocess
 import sys
 import time
 import threading
@@ -60,6 +61,41 @@ MAX_RETRIES = 5
 stats_lock = Lock()
 total_processed = 0
 total_errors = 0
+
+
+_ID_TOKEN_TTL_S = 45 * 60  # identity token do gcloud vale 1 h
+_id_token_lock = Lock()
+_id_token_cache = {"token": None, "at": 0.0}
+
+
+def _reset_id_token_cache() -> None:
+    with _id_token_lock:
+        _id_token_cache.update(token=None, at=0.0)
+
+
+def _id_token() -> str:
+    """Identity token para o IAM do Cloud Run (a embeddings-api não aceita só a API key).
+
+    Usa EMBEDDINGS_ID_TOKEN se definido; senão `gcloud auth print-identity-token`,
+    com cache de 45 min (thread-safe).
+    """
+    env_token = os.environ.get("EMBEDDINGS_ID_TOKEN", "").strip()
+    if env_token:
+        return env_token
+    with _id_token_lock:
+        now = time.time()
+        if _id_token_cache["token"] and now - _id_token_cache["at"] < _ID_TOKEN_TTL_S:
+            return _id_token_cache["token"]
+        out = subprocess.run(
+            ["gcloud", "auth", "print-identity-token"],
+            capture_output=True, text=True, check=True,
+        )
+        _id_token_cache.update(token=out.stdout.strip(), at=now)
+        return _id_token_cache["token"]
+
+
+def auth_headers(api_key: str) -> dict:
+    return {"X-API-Key": api_key, "Authorization": f"Bearer {_id_token()}"}
 
 
 def get_env(name: str) -> str:
@@ -133,10 +169,7 @@ def generate_embeddings_via_api(api_url: str, api_key: str, texts: list, worker_
             req = urllib.request.Request(
                 f"{api_url}/generate",
                 data=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-API-Key": api_key,
-                },
+                headers={"Content-Type": "application/json", **auth_headers(api_key)},
             )
             with urllib.request.urlopen(req, timeout=180) as resp:
                 data = json.load(resp)
@@ -262,7 +295,7 @@ def main():
     api_key = get_env("EMBEDDINGS_API_KEY")
 
     # Verify API health
-    req = urllib.request.Request(f"{api_url}/health")
+    req = urllib.request.Request(f"{api_url}/health", headers=auth_headers(api_key))
     with urllib.request.urlopen(req, timeout=10) as resp:
         health = json.load(resp)
     if not health.get("model_loaded"):
