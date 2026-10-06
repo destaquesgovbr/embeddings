@@ -86,3 +86,31 @@ def test_cli_aceita_require_summary(backfill):
     args = backfill.parse_args(["--require-summary", "--end-date", "2026-10-06"])
     assert args.require_summary is True
     assert backfill.parse_args([]).require_summary is False
+
+
+def test_headers_incluem_api_key_e_id_token(backfill, monkeypatch):
+    monkeypatch.setenv("EMBEDDINGS_ID_TOKEN", "tok-123")
+    backfill._reset_id_token_cache()
+    headers = backfill.auth_headers("chave")
+    assert headers["X-API-Key"] == "chave"
+    assert headers["Authorization"] == "Bearer tok-123"
+
+
+def test_id_token_via_gcloud_com_cache(backfill, monkeypatch):
+    monkeypatch.delenv("EMBEDDINGS_ID_TOKEN", raising=False)
+    backfill._reset_id_token_cache()
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+
+        class R:
+            stdout = "tok-gcloud\n"
+
+        return R()
+
+    monkeypatch.setattr(backfill.subprocess, "run", fake_run)
+    assert backfill.auth_headers("k")["Authorization"] == "Bearer tok-gcloud"
+    assert backfill.auth_headers("k")["Authorization"] == "Bearer tok-gcloud"
+    assert len(calls) == 1
+    assert calls[0][:3] == ["gcloud", "auth", "print-identity-token"]
