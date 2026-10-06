@@ -17,6 +17,8 @@ def backfill():
 
 
 class _Cursor:
+    description = [("id",), ("unique_id",), ("title",), ("summary",), ("content",)]
+
     def __init__(self, rows):
         self.rows = rows
         self.queries = []

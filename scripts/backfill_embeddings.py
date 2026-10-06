@@ -69,8 +69,13 @@ def get_env(name: str) -> str:
     return val
 
 
-def count_missing(conn, start_date, end_date) -> int:
+_REQUIRE_SUMMARY_SQL = " AND summary IS NOT NULL"
+
+
+def count_missing(conn, start_date, end_date, require_summary: bool = False) -> int:
     query = "SELECT COUNT(*) FROM news WHERE content_embedding IS NULL"
+    if require_summary:
+        query += _REQUIRE_SUMMARY_SQL
     params = []
     if start_date:
         query += " AND published_at >= %s"
@@ -83,20 +88,26 @@ def count_missing(conn, start_date, end_date) -> int:
         return cur.fetchone()[0]
 
 
-def fetch_batch_by_ids(conn, ids) -> list:
+def fetch_batch_by_ids(conn, ids, require_summary: bool = False) -> list:
     query = """
         SELECT id, unique_id, title, summary, content
         FROM news
         WHERE id = ANY(%s) AND content_embedding IS NULL
     """
+    if require_summary:
+        query += _REQUIRE_SUMMARY_SQL
     with conn.cursor() as cur:
         cur.execute(query, (ids,))
         columns = [desc[0] for desc in cur.description]
         return [dict(zip(columns, row)) for row in cur.fetchall()]
 
 
-def fetch_ids_missing_embeddings(conn, total_needed, start_date, end_date) -> list:
+def fetch_ids_missing_embeddings(
+    conn, total_needed, start_date, end_date, require_summary: bool = False
+) -> list:
     query = "SELECT id FROM news WHERE content_embedding IS NULL"
+    if require_summary:
+        query += _REQUIRE_SUMMARY_SQL
     params = []
     if start_date:
         query += " AND published_at >= %s"
@@ -152,7 +163,7 @@ def update_embeddings(conn, updates) -> int:
     return len(updates)
 
 
-def process_chunk(worker_id, ids, batch_size, db_url, api_url, api_key):
+def process_chunk(worker_id, ids, batch_size, db_url, api_url, api_key, require_summary=False):
     """Process a chunk of article IDs with its own DB connection."""
     global total_processed, total_errors
 
@@ -162,7 +173,7 @@ def process_chunk(worker_id, ids, batch_size, db_url, api_url, api_key):
     for i in range(0, len(ids), batch_size):
         batch_ids = ids[i : i + batch_size]
 
-        articles = fetch_batch_by_ids(conn, batch_ids)
+        articles = fetch_batch_by_ids(conn, batch_ids, require_summary)
         if not articles:
             continue
 
@@ -205,9 +216,7 @@ def process_chunk(worker_id, ids, batch_size, db_url, api_url, api_key):
     return worker_processed
 
 
-def main():
-    global total_processed, total_errors
-
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Backfill embeddings for news articles missing them."
     )
@@ -217,7 +226,19 @@ def main():
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--start-date", type=str, default=None)
     parser.add_argument("--end-date", type=str, default=None)
-    args = parser.parse_args()
+    parser.add_argument(
+        "--require-summary",
+        action="store_true",
+        help="só artigos com summary (o texto do embedding é título + resumo; "
+        "evita congelar embedding sem resumo de artigo que ainda vai ganhá-lo)",
+    )
+    return parser.parse_args(argv)
+
+
+def main():
+    global total_processed, total_errors
+
+    args = parse_args()
 
     if args.batch_size > API_MAX_BATCH:
         args.batch_size = API_MAX_BATCH
@@ -225,9 +246,12 @@ def main():
     db_url = get_env("DATABASE_URL")
     conn = psycopg2.connect(db_url)
 
-    missing = count_missing(conn, args.start_date, args.end_date)
+    missing = count_missing(conn, args.start_date, args.end_date, args.require_summary)
     target = min(missing, args.limit) if args.limit else missing
-    logger.info(f"Articles without embeddings: {missing}")
+    logger.info(
+        f"Articles without embeddings: {missing}"
+        + (" (com summary)" if args.require_summary else "")
+    )
     logger.info(f"Target: {target}")
 
     if args.dry_run or missing == 0:
@@ -247,7 +271,9 @@ def main():
 
     # Fetch all IDs upfront
     logger.info(f"Fetching IDs...")
-    all_ids = fetch_ids_missing_embeddings(conn, target, args.start_date, args.end_date)
+    all_ids = fetch_ids_missing_embeddings(
+        conn, target, args.start_date, args.end_date, args.require_summary
+    )
     conn.close()
     target = len(all_ids)
 
@@ -296,6 +322,7 @@ def main():
                 db_url=db_url,
                 api_url=api_url,
                 api_key=api_key,
+                require_summary=args.require_summary,
             ): i
             for i, chunk in enumerate(chunks)
         }
