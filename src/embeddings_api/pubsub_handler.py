@@ -34,7 +34,7 @@ def fetch_article(unique_id: str) -> dict | None:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, title, summary, content, content_embedding"
+                "SELECT id, title, summary, content, content_embedding, embedding_model_version"
                 " FROM news WHERE unique_id = %s",
                 (unique_id,),
             )
@@ -47,13 +47,20 @@ def fetch_article(unique_id: str) -> dict | None:
                 "summary": row[2],
                 "content": row[3],
                 "has_embedding": row[4] is not None,
+                "embedding_model_version": row[5],
             }
     finally:
         conn.close()
 
 
-def update_embedding(news_id: int, embedding: list[float]) -> None:
-    """Update news record with generated embedding."""
+def update_embedding(news_id: int, embedding: list[float], model_version: str) -> None:
+    """Update news record with generated embedding.
+
+    Args:
+        news_id: Database ID of the news article
+        embedding: Generated embedding vector
+        model_version: Model identifier (e.g., 'bge-m3')
+    """
     conn = psycopg2.connect(_get_database_url())
     try:
         with conn.cursor() as cur:
@@ -61,10 +68,11 @@ def update_embedding(news_id: int, embedding: list[float]) -> None:
                 """
                 UPDATE news
                 SET content_embedding = %s::vector,
+                    embedding_model_version = %s,
                     embedding_generated_at = %s
                 WHERE id = %s
                 """,
-                (embedding, datetime.now(UTC), news_id),
+                (embedding, model_version, datetime.now(UTC), news_id),
             )
             conn.commit()
     except Exception:
@@ -111,10 +119,11 @@ def process_article(unique_id: str) -> dict:
         logger.warning(f"Article not found: {unique_id}")
         return {"status": "not_found"}
 
-    # Idempotency
-    if article["has_embedding"]:
-        logger.info(f"Already has embedding: {unique_id}")
-        return {"status": "skipped", "reason": "already_embedded"}
+    # Idempotency: skip if already has BGE-M3 embedding
+    # During migration, articles may have legacy mpnet embeddings - those will be re-embedded
+    if article["has_embedding"] and article["embedding_model_version"] == "bge-m3":
+        logger.info(f"Already has BGE-M3 embedding: {unique_id}")
+        return {"status": "skipped", "reason": "already_embedded_bge_m3"}
 
     if not embedding_service.is_loaded:
         logger.error("Model not loaded")
@@ -131,9 +140,9 @@ def process_article(unique_id: str) -> dict:
     embeddings = embedding_service.generate([text])
     embedding = embeddings[0]
 
-    # Update PostgreSQL
-    update_embedding(article["id"], embedding)
-    logger.info(f"Embedding stored for {unique_id} (dim={len(embedding)})")
+    # Update PostgreSQL with model version tracking
+    update_embedding(article["id"], embedding, model_version="bge-m3")
+    logger.info(f"BGE-M3 embedding stored for {unique_id} (dim={len(embedding)})")
 
     # Publish event
     publish_embedded_event(unique_id, len(embedding))

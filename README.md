@@ -4,7 +4,10 @@ FastAPI service for generating text embeddings using ML models.
 
 ## Overview
 
-This service provides a simple HTTP API to generate text embeddings using the `paraphrase-multilingual-mpnet-base-v2` model from sentence-transformers. It's designed to run on Google Cloud Run and be called by the data-platform pipeline.
+This service provides a simple HTTP API to generate text embeddings using the **BAAI/bge-m3** model from sentence-transformers. It's designed to run on Google Cloud Run and be called by the data-platform pipeline.
+
+**Model:** BGE-M3 (multilingual, 1024-dim, 8192 max tokens)  
+**Validated:** data-science#1 (chosen over mpnet-768d based on NDCG@10, MAP, MRR metrics)
 
 ## API Endpoints
 
@@ -29,8 +32,8 @@ Generate embeddings for a list of texts.
     [0.123, -0.456, ...],
     [0.789, -0.012, ...]
   ],
-  "model": "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
-  "dimension": 768,
+  "model": "BAAI/bge-m3",
+  "dimension": 1024,
   "count": 2
 }
 ```
@@ -69,7 +72,8 @@ poetry run pytest -v
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `API_KEY` | API key for authentication | `dev-api-key` |
-| `MODEL_NAME` | Sentence transformer model | `sentence-transformers/paraphrase-multilingual-mpnet-base-v2` |
+| `MODEL_NAME` | Sentence transformer model | `BAAI/bge-m3` |
+| `MODEL_DIMENSION` | Expected embedding dimension | `1024` |
 | `PORT` | Server port | `8080` |
 
 ## Deployment
