@@ -11,7 +11,7 @@ from . import __version__
 from .auth import verify_api_key
 from .config import Settings, settings
 from .embedding_service import embedding_service
-from .pubsub_handler import process_article
+from .pubsub_handler import PublishError, process_article
 from .schemas import ErrorResponse, GenerateRequest, GenerateResponse, HealthResponse
 
 logging.basicConfig(
@@ -143,6 +143,12 @@ def create_app(app_settings: Settings | None = None) -> FastAPI:
             result = process_article(unique_id)
             logger.info(f"Result for {unique_id}: {result['status']}")
             return Response(status_code=200, content=json.dumps(result))
+        except PublishError as e:
+            # Transient: the embedding may already be stored, but the event was
+            # not published. NACK so Pub/Sub redelivers; the retry takes the
+            # idempotent path and re-publishes (DLQ after max attempts).
+            logger.error(f"Publish failed for {unique_id}, NACKing: {e}", exc_info=True)
+            return Response(status_code=500, content=f"NACK (publish failed: {e})")
         except Exception as e:
             logger.error(f"Error processing {unique_id}: {e}", exc_info=True)
             return Response(status_code=200, content=f"ACK (error: {e})")
