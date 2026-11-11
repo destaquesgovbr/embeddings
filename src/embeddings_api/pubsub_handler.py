@@ -74,8 +74,24 @@ def update_embedding(news_id: int, embedding: list[float]) -> None:
         conn.close()
 
 
+PUBLISH_TIMEOUT_SECONDS = 30
+
+
+class PublishError(RuntimeError):
+    """Publishing dgb.news.embedded failed; the push message must be redelivered."""
+
+
 def publish_embedded_event(unique_id: str, embedding_dim: int) -> None:
-    """Publish dgb.news.embedded event to Pub/Sub."""
+    """Publish dgb.news.embedded event to Pub/Sub and wait for the broker ack.
+
+    The publish is awaited before the HTTP response: Cloud Run may only
+    allocate CPU during requests (cpu_idle), so a fire-and-forget publish left
+    to the client's background thread can be delayed or lost.
+
+    Raises:
+        PublishError: if the publish fails or does not complete within
+            PUBLISH_TIMEOUT_SECONDS.
+    """
     topic = os.environ.get("PUBSUB_TOPIC_NEWS_EMBEDDED")
     if not topic:
         return
@@ -89,15 +105,17 @@ def publish_embedded_event(unique_id: str, embedding_dim: int) -> None:
             "embedded_at": datetime.now(UTC).isoformat(),
             "embedding_dim": embedding_dim,
         }
-        client.publish(
+        future = client.publish(
             topic,
             json.dumps(message).encode("utf-8"),
             trace_id=str(uuid.uuid4()),
             event_version="1.0",
         )
-        logger.info(f"Published dgb.news.embedded for {unique_id}")
+        future.result(timeout=PUBLISH_TIMEOUT_SECONDS)
     except Exception as e:
-        logger.warning(f"Failed to publish embedded event for {unique_id}: {e}")
+        raise PublishError(f"Failed to publish embedded event for {unique_id}: {e}") from e
+
+    logger.info(f"Published dgb.news.embedded for {unique_id}")
 
 
 def process_article(unique_id: str) -> dict:
@@ -105,15 +123,22 @@ def process_article(unique_id: str) -> dict:
     Full embedding pipeline for a single article.
 
     Uses the local model (no HTTP call to /generate).
+
+    Raises:
+        PublishError: if the embedding was stored but the event could not be
+            published. The caller must NACK so Pub/Sub redelivers.
     """
     article = fetch_article(unique_id)
     if article is None:
         logger.warning(f"Article not found: {unique_id}")
         return {"status": "not_found"}
 
-    # Idempotency
+    # Idempotency: don't regenerate, but re-publish the event. This is how a
+    # redelivery recovers when a previous attempt stored the embedding and then
+    # failed to publish; the consumer (typesense-sync upsert) is idempotent.
     if article["has_embedding"]:
         logger.info(f"Already has embedding: {unique_id}")
+        publish_embedded_event(unique_id, embedding_service.dimension)
         return {"status": "skipped", "reason": "already_embedded"}
 
     if not embedding_service.is_loaded:

@@ -68,6 +68,32 @@ class TestProcessEndpoint:
         resp = client.post("/process", json=pubsub_envelope)
         assert resp.status_code == 200
 
+    @patch("src.embeddings_api.main.process_article")
+    def test_publish_error_nacks_with_5xx(self, mock_process, client, pubsub_envelope):
+        """A failed publish must NACK (5xx) so Pub/Sub redelivers the message."""
+        from src.embeddings_api.pubsub_handler import PublishError
+
+        mock_process.side_effect = PublishError("deadline exceeded")
+        resp = client.post("/process", json=pubsub_envelope)
+        assert resp.status_code == 500
+
+    @patch.dict("os.environ", {"PUBSUB_TOPIC_NEWS_EMBEDDED": "projects/p/topics/t"})
+    @patch("google.cloud.pubsub_v1.PublisherClient")
+    @patch("src.embeddings_api.pubsub_handler.update_embedding")
+    @patch("src.embeddings_api.pubsub_handler.fetch_article")
+    def test_publish_future_failure_end_to_end_returns_500(
+        self, mock_fetch, mock_update, mock_client_class, client, pubsub_envelope, sample_article
+    ):
+        mock_fetch.return_value = sample_article
+        future = mock_client_class.return_value.publish.return_value
+        future.result.side_effect = Exception("Deadline Exceeded")
+
+        resp = client.post("/process", json=pubsub_envelope)
+
+        assert resp.status_code == 500
+        mock_update.assert_called_once()
+        future.result.assert_called_once()
+
     def test_no_auth_required(self, client, pubsub_envelope):
         """POST /process does not require X-API-Key (OIDC via Cloud Run IAM)."""
         with patch("src.embeddings_api.pubsub_handler.process_article") as mock:
@@ -109,8 +135,11 @@ class TestProcessArticle:
         result = process_article("nonexistent")
         assert result["status"] == "not_found"
 
+    @patch("src.embeddings_api.pubsub_handler.publish_embedded_event")
+    @patch("src.embeddings_api.pubsub_handler.update_embedding")
     @patch("src.embeddings_api.pubsub_handler.fetch_article")
-    def test_skips_already_embedded(self, mock_fetch):
+    def test_skips_already_embedded_but_republishes(self, mock_fetch, mock_update, mock_publish):
+        """Redelivery after a failed publish: no regeneration, but the event goes out."""
         from src.embeddings_api.pubsub_handler import process_article
 
         mock_fetch.return_value = {
@@ -121,6 +150,21 @@ class TestProcessArticle:
         result = process_article("test-1")
         assert result["status"] == "skipped"
         assert result["reason"] == "already_embedded"
+        mock_update.assert_not_called()
+        mock_publish.assert_called_once_with("test-1", 768)
+
+    @patch("src.embeddings_api.pubsub_handler.publish_embedded_event")
+    @patch("src.embeddings_api.pubsub_handler.update_embedding")
+    @patch("src.embeddings_api.pubsub_handler.fetch_article")
+    def test_publish_error_propagates(self, mock_fetch, mock_update, mock_publish, sample_article):
+        from src.embeddings_api.pubsub_handler import PublishError, process_article
+
+        mock_fetch.return_value = sample_article
+        mock_publish.side_effect = PublishError("boom")
+
+        with pytest.raises(PublishError):
+            process_article("test-1")
+        mock_update.assert_called_once()  # embedding stored before the publish attempt
 
     @patch("src.embeddings_api.pubsub_handler.update_embedding", side_effect=Exception("DB error"))
     @patch("src.embeddings_api.pubsub_handler.fetch_article")
@@ -159,3 +203,41 @@ class TestPublishEmbeddedEvent:
         assert data["unique_id"] == "test-1"
         assert data["embedding_dim"] == 768
         assert "embedded_at" in data
+
+    @patch.dict("os.environ", {"PUBSUB_TOPIC_NEWS_EMBEDDED": "projects/p/topics/t"})
+    @patch("google.cloud.pubsub_v1.PublisherClient")
+    def test_waits_for_publish_future(self, mock_client_class):
+        """The publish future is awaited before returning (cpu_idle-safe)."""
+        from src.embeddings_api.pubsub_handler import (
+            PUBLISH_TIMEOUT_SECONDS,
+            publish_embedded_event,
+        )
+
+        future = mock_client_class.return_value.publish.return_value
+        publish_embedded_event("test-1", 768)
+
+        future.result.assert_called_once_with(timeout=PUBLISH_TIMEOUT_SECONDS)
+        assert PUBLISH_TIMEOUT_SECONDS == 30
+
+    @patch.dict("os.environ", {"PUBSUB_TOPIC_NEWS_EMBEDDED": "projects/p/topics/t"})
+    @patch("google.cloud.pubsub_v1.PublisherClient")
+    def test_future_failure_raises_publish_error(self, mock_client_class):
+        from concurrent.futures import TimeoutError as FutureTimeout
+
+        from src.embeddings_api.pubsub_handler import PublishError, publish_embedded_event
+
+        future = mock_client_class.return_value.publish.return_value
+        future.result.side_effect = FutureTimeout()
+
+        with pytest.raises(PublishError, match="test-1"):
+            publish_embedded_event("test-1", 768)
+
+    @patch.dict("os.environ", {"PUBSUB_TOPIC_NEWS_EMBEDDED": "projects/p/topics/t"})
+    @patch("google.cloud.pubsub_v1.PublisherClient")
+    def test_publish_call_failure_raises_publish_error(self, mock_client_class):
+        from src.embeddings_api.pubsub_handler import PublishError, publish_embedded_event
+
+        mock_client_class.return_value.publish.side_effect = RuntimeError("no credentials")
+
+        with pytest.raises(PublishError, match="no credentials"):
+            publish_embedded_event("test-1", 768)
